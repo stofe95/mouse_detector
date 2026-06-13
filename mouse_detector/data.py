@@ -27,6 +27,17 @@ class CocoMouseDataset(Dataset):
         for ann in coco["annotations"]:
             self.annotations_by_image.setdefault(ann["image_id"], []).append(ann)
 
+        missing_annotations = [img_id for img_id in self.image_ids if img_id not in self.annotations_by_image]
+        if missing_annotations:
+            preview_pairs = [
+                (img_id, self.image_records[img_id]["file_name"]) for img_id in missing_annotations[:10]
+            ]
+            suffix = "..." if len(missing_annotations) > len(preview_pairs) else ""
+            raise ValueError(
+                "Each image must contain at least one annotation. "
+                f"Missing annotations for {len(missing_annotations)} image IDs/files: {preview_pairs}{suffix}"
+            )
+
     def __len__(self) -> int:
         return len(self.image_ids)
 
@@ -50,12 +61,6 @@ class CocoMouseDataset(Dataset):
             areas.append(ann.get("area", w * h))
             iscrowd.append(ann.get("iscrowd", 0))
 
-        if not boxes:
-            boxes = [[0.0, 0.0, 1.0, 1.0]]
-            labels = [1]
-            areas = [1.0]
-            iscrowd = [0]
-
         target = {
             "boxes": torch.tensor(boxes, dtype=torch.float32),
             "labels": torch.tensor(labels, dtype=torch.int64),
@@ -66,5 +71,7 @@ class CocoMouseDataset(Dataset):
         return image_tensor, target
 
 
-def collate_fn(batch: list[tuple[torch.Tensor, dict[str, torch.Tensor]]]):
+def collate_fn(
+    batch: list[tuple[torch.Tensor, dict[str, torch.Tensor]]],
+) -> tuple[tuple[torch.Tensor, ...], tuple[dict[str, torch.Tensor], ...]]:
     return tuple(zip(*batch))

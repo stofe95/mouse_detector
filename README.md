@@ -30,6 +30,7 @@ python -m mouse_detector.infer_videos \
   --input-dir /path/to/input_videos \
   --output-dir /path/to/output_videos \
   --size 640x360 \
+  --codec mp4v \
   --threshold 0.5
 ```
 

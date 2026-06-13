@@ -7,8 +7,9 @@ VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".mpg", ".mpeg", ".wmv"}
 
 
 def parse_size(value: str) -> tuple[int, int]:
-    if "x" in value.lower():
-        width_str, height_str = value.lower().split("x", 1)
+    normalized = value.lower()
+    if "x" in normalized:
+        width_str, height_str = normalized.split("x", 1)
     else:
         parts = value.split(",")
         if len(parts) != 2:

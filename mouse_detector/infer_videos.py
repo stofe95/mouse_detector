@@ -18,16 +18,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", required=True, help="Output folder for resized detected videos")
     parser.add_argument("--size", type=parse_size, required=True, help="Output size WIDTHxHEIGHT")
     parser.add_argument("--threshold", type=float, default=0.5, help="Detection confidence threshold")
+    parser.add_argument("--codec", default="mp4v", help="FourCC codec for output videos (e.g. mp4v, XVID)")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     return parser.parse_args()
 
 
-def select_box(prediction: dict[str, torch.Tensor], threshold: float) -> np.ndarray:
+def select_box(prediction: dict[str, torch.Tensor], threshold: float) -> np.ndarray | None:
     boxes = prediction["boxes"].detach().cpu().numpy()
     scores = prediction["scores"].detach().cpu().numpy()
 
     if len(scores) == 0:
-        return np.array([0, 0, 1, 1], dtype=np.float32)
+        return None
 
     valid = np.where(scores >= threshold)[0]
     if len(valid) == 0:
@@ -37,7 +38,9 @@ def select_box(prediction: dict[str, torch.Tensor], threshold: float) -> np.ndar
     return boxes[best_idx]
 
 
-def draw_box(frame: np.ndarray, box: np.ndarray) -> np.ndarray:
+def draw_box(frame: np.ndarray, box: np.ndarray | None) -> np.ndarray:
+    if box is None:
+        return frame
     x1, y1, x2, y2 = box.astype(int)
     x1 = max(0, x1)
     y1 = max(0, y1)
@@ -63,14 +66,18 @@ def process_video(
     output_path: Path,
     output_size: tuple[int, int],
     threshold: float,
+    codec: str,
     device: torch.device,
 ) -> None:
+    if len(codec) != 4:
+        raise ValueError(f"Codec must be exactly 4 characters, got '{codec}'.")
+
     capture = cv2.VideoCapture(str(video_path))
     if not capture.isOpened():
         raise RuntimeError(f"Failed to open video: {video_path}")
 
     fps = capture.get(cv2.CAP_PROP_FPS) or 30.0
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    fourcc = cv2.VideoWriter_fourcc(*codec[:4])
     writer = cv2.VideoWriter(str(output_path), fourcc, fps, output_size)
     if not writer.isOpened():
         capture.release()
@@ -109,7 +116,7 @@ def run(args: argparse.Namespace) -> None:
 
     for video_path in videos:
         output_path = output_dir / video_path.name
-        process_video(model, video_path, output_path, args.size, args.threshold, device)
+        process_video(model, video_path, output_path, args.size, args.threshold, args.codec, device)
         print(f"Processed {video_path.name} -> {output_path}")
 
 

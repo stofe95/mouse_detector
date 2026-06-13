@@ -10,8 +10,10 @@ from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 
 from mouse_detector.data import CocoMouseDataset, collate_fn
 
+NUM_CLASSES = 2
 
-def build_model(num_classes: int = 2) -> torch.nn.Module:
+
+def build_model(num_classes: int = NUM_CLASSES) -> torch.nn.Module:
     model = fasterrcnn_mobilenet_v3_large_320_fpn(weights=None, weights_backbone=None)
     in_features = model.roi_heads.box_predictor.cls_score.in_features
     model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
@@ -34,6 +36,8 @@ def parse_args() -> argparse.Namespace:
 def train(args: argparse.Namespace) -> None:
     device = torch.device(args.device)
     dataset = CocoMouseDataset(args.images, args.annotations)
+    if len(dataset) == 0:
+        raise ValueError("Training dataset is empty.")
     loader = DataLoader(
         dataset,
         batch_size=args.batch_size,
@@ -42,7 +46,7 @@ def train(args: argparse.Namespace) -> None:
         collate_fn=collate_fn,
     )
 
-    model = build_model().to(device)
+    model = build_model(num_classes=NUM_CLASSES).to(device)
     params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.SGD(params, lr=args.lr, momentum=0.9, weight_decay=0.0005)
 
@@ -62,12 +66,12 @@ def train(args: argparse.Namespace) -> None:
 
             epoch_loss += losses.item()
 
-        avg_loss = epoch_loss / max(1, len(loader))
+        avg_loss = epoch_loss / len(loader)
         print(f"Epoch {epoch + 1}/{args.epochs} loss={avg_loss:.4f}")
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save({"model_state_dict": model.state_dict(), "num_classes": 2}, output_path)
+    torch.save({"model_state_dict": model.state_dict(), "num_classes": NUM_CLASSES}, output_path)
     print(f"Saved model to {output_path}")
 
 
