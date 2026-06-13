@@ -35,3 +35,16 @@ python -m mouse_detector.infer_videos \
 ```
 
 Output videos are written to `--output-dir` with the same filenames and the exact requested output size.
+
+## Validation on annotated images
+
+```bash
+python -m mouse_detector.validate_annotations \
+  --weights /path/to/checkpoints/mouse_detector.pt \
+  --images /path/to/coco/images \
+  --annotations /path/to/coco/annotations.json \
+  --output-dir /path/to/output_images \
+  --threshold 0.5
+```
+
+Output images are written to `--output-dir` with the same relative filenames as the annotated COCO images and include blue labeled boxes plus the green inferred box.
