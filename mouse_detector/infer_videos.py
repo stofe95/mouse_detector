@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
 
 import cv2
@@ -43,8 +44,8 @@ def crop_frame(frame: np.ndarray, center: tuple[float, float], output_size: tupl
     frame_height, frame_width = frame.shape[:2]
     center_x, center_y = center
 
-    crop_x1 = int(round(center_x - (output_width / 2.0)))
-    crop_y1 = int(round(center_y - (output_height / 2.0)))
+    crop_x1 = math.floor(center_x - (output_width / 2.0) + 0.5)
+    crop_y1 = math.floor(center_y - (output_height / 2.0) + 0.5)
     crop_x2 = crop_x1 + output_width
     crop_y2 = crop_y1 + output_height
 
@@ -71,7 +72,7 @@ def crop_frame(frame: np.ndarray, center: tuple[float, float], output_size: tupl
 
 def crop_frame_around_box(frame: np.ndarray, box: np.ndarray | None, output_size: tuple[int, int]) -> np.ndarray:
     if box is None:
-        center = ((frame.shape[1] - 1) / 2.0, (frame.shape[0] - 1) / 2.0)
+        center = (frame.shape[1] / 2.0, frame.shape[0] / 2.0)
     else:
         x1, y1, x2, y2 = box.astype(float)
         center = ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
