@@ -3,7 +3,7 @@
 PyTorch-based mouse detector for COCO datasets with:
 - training on COCO images + bounding boxes
 - inference across a folder of videos
-- output resized videos with mouse boxes drawn
+- output cropped videos centered on the detected mouse
 
 ## Install
 
@@ -34,7 +34,7 @@ python -m mouse_detector.infer_videos \
   --threshold 0.5
 ```
 
-Output videos are written to `--output-dir` with the same filenames and the exact requested output size.
+Output videos are written to `--output-dir` with the same filenames and the exact requested output size. Each frame is cropped around the center of the selected detection, and any area beyond the source frame is filled with black pixels.
 
 ## Validation on annotated images
 
