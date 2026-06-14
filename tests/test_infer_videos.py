@@ -168,5 +168,54 @@ class SmoothCentersTests(InferVideosTestBase):
         self.assertEqual(result.shape, (0, 2))
 
 
+class CenterCacheTests(InferVideosTestBase):
+    def test_load_or_compute_centers_uses_cache_when_present(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            centers_path = Path(tmp) / "video_centers.npy"
+            expected = np.array([[1.0, 2.0], [3.0, 4.0]])
+            np.save(centers_path, expected)
+
+            centers, source = self.infer_videos.load_or_compute_centers(
+                model=None,
+                video_path=Path("video.mp4"),
+                centers_path=centers_path,
+                threshold=0.5,
+                device="cpu",
+                smooth_window=15,
+                reuse_centers=False,
+            )
+
+        np.testing.assert_array_equal(centers, expected)
+        self.assertEqual(source, "cached")
+
+    def test_load_or_compute_centers_rejects_missing_file_when_reuse_enabled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            centers_path = Path(tmp) / "missing_centers.npy"
+            with self.assertRaises(FileNotFoundError):
+                self.infer_videos.load_or_compute_centers(
+                    model=None,
+                    video_path=Path("video.mp4"),
+                    centers_path=centers_path,
+                    threshold=0.5,
+                    device="cpu",
+                    smooth_window=15,
+                    reuse_centers=True,
+                )
+
+    def test_load_or_compute_centers_requires_model_when_cache_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            centers_path = Path(tmp) / "missing_centers.npy"
+            with self.assertRaises(ValueError):
+                self.infer_videos.load_or_compute_centers(
+                    model=None,
+                    video_path=Path("video.mp4"),
+                    centers_path=centers_path,
+                    threshold=0.5,
+                    device="cpu",
+                    smooth_window=15,
+                    reuse_centers=False,
+                )
+
+
 if __name__ == "__main__":
     unittest.main()

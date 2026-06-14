@@ -14,13 +14,18 @@ from mouse_detector.train import build_model
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run mouse detection on all videos in a folder.")
-    parser.add_argument("--weights", required=True, help="Trained model checkpoint (.pt)")
+    parser.add_argument(
+        "--weights",
+        help="Trained model checkpoint (.pt); required when processing videos without cached centers",
+    )
     parser.add_argument("--input-dir", required=True, help="Input folder containing videos")
     parser.add_argument("--output-dir", required=True, help="Output folder for cropped detected videos")
+    parser.add_argument("--centers-dir", help="Folder for loading/saving *_centers.npy (default: output-dir)")
     parser.add_argument("--size", type=parse_size, required=True, help="Output size WIDTHxHEIGHT")
     parser.add_argument("--threshold", type=float, default=0.5, help="Detection confidence threshold")
     parser.add_argument("--codec", default="mp4v", help="FourCC codec for output videos (e.g. mp4v, XVID)")
     parser.add_argument("--smooth-window", type=int, default=15, help="Moving-average window size for center smoothing (1 = off)")
+    parser.add_argument("--reuse-centers", action="store_true", help="Reuse existing center files and skip inference")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     return parser.parse_args()
 
@@ -194,43 +199,114 @@ def render_video(
         writer.release()
 
 
+def load_centers(centers_path: Path) -> np.ndarray:
+    """Load cached center coordinates from a ``*_centers.npy`` file.
+
+    The file must contain an array shaped ``(N, 2)`` where each row is
+    ``(center_x, center_y)`` for one frame. ``N`` may be zero for empty videos.
+    """
+    centers = np.load(centers_path)
+    if centers.ndim != 2 or centers.shape[1] != 2:
+        raise ValueError(f"Invalid centers file '{centers_path}': expected shape (N, 2)")
+    return centers.astype(np.float64, copy=False)
+
+
+def load_or_compute_centers(
+    model: torch.nn.Module | None,
+    video_path: Path,
+    centers_path: Path,
+    threshold: float,
+    device: torch.device,
+    smooth_window: int,
+    reuse_centers: bool,
+) -> tuple[np.ndarray, str]:
+    """Return centers for a video, either from cache or fresh inference.
+
+    Returns a tuple ``(centers, source)`` where ``source`` is ``"cached"``
+    when loaded from ``centers_path`` and ``"inferred"`` when computed and saved.
+    """
+    if centers_path.exists():
+        return load_centers(centers_path), "cached"
+
+    if reuse_centers:
+        raise FileNotFoundError(f"Missing centers file for {video_path.name}: {centers_path}")
+
+    if model is None:
+        raise ValueError("Model weights are required to infer centers when cache files are missing.")
+
+    centers = compute_centers(model, video_path, threshold, device)
+    centers = smooth_centers(centers, smooth_window)
+    centers_path.parent.mkdir(parents=True, exist_ok=True)
+    np.save(centers_path, centers)
+    return centers, "inferred"
+
+
 def process_video(
-    model: torch.nn.Module,
+    model: torch.nn.Module | None,
     video_path: Path,
     output_path: Path,
+    centers_path: Path,
     output_size: tuple[int, int],
     threshold: float,
     codec: str,
     device: torch.device,
     smooth_window: int = 15,
-) -> None:
+    reuse_centers: bool = False,
+) -> str:
     if len(codec) != 4:
         raise ValueError(f"Codec must be exactly 4 characters, got '{codec}'.")
-    centers = compute_centers(model, video_path, threshold, device)
-    centers = smooth_centers(centers, smooth_window)
-
-    centers_path = output_path.with_name(output_path.stem + "_centers.npy")
-    np.save(centers_path, centers)
+    centers, center_source = load_or_compute_centers(
+        model=model,
+        video_path=video_path,
+        centers_path=centers_path,
+        threshold=threshold,
+        device=device,
+        smooth_window=smooth_window,
+        reuse_centers=reuse_centers,
+    )
 
     render_video(video_path, output_path, centers, output_size, codec)
+    return center_source
 
 
 def run(args: argparse.Namespace) -> None:
     device = torch.device(args.device)
-    model = load_model(args.weights, device)
-
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    centers_dir = Path(args.centers_dir) if args.centers_dir else output_dir
+    centers_dir.mkdir(parents=True, exist_ok=True)
 
     videos = list_video_files(args.input_dir)
     if not videos:
         print("No video files found.")
         return
 
+    loaded_model: torch.nn.Module | None = None
     for video_path in videos:
         output_path = output_dir / video_path.name
-        process_video(model, video_path, output_path, args.size, args.threshold, args.codec, device, args.smooth_window)
-        print(f"Processed {video_path.name} -> {output_path}")
+        centers_path = centers_dir / f"{video_path.stem}_centers.npy"
+
+        if not centers_path.exists() and loaded_model is None:
+            if not args.weights:
+                raise ValueError(
+                    "Model weights are required via --weights when center cache files are missing. "
+                    "Use --reuse-centers only when all centers files already exist."
+                )
+            loaded_model = load_model(args.weights, device)
+
+        center_source = process_video(
+            model=loaded_model,
+            video_path=video_path,
+            output_path=output_path,
+            centers_path=centers_path,
+            output_size=args.size,
+            threshold=args.threshold,
+            codec=args.codec,
+            device=device,
+            smooth_window=args.smooth_window,
+            reuse_centers=args.reuse_centers,
+        )
+        print(f"Processed {video_path.name} -> {output_path} (centers: {center_source})")
 
 
 def main() -> None:
