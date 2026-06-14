@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
 
 import cv2
@@ -15,7 +16,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run mouse detection on all videos in a folder.")
     parser.add_argument("--weights", required=True, help="Trained model checkpoint (.pt)")
     parser.add_argument("--input-dir", required=True, help="Input folder containing videos")
-    parser.add_argument("--output-dir", required=True, help="Output folder for resized detected videos")
+    parser.add_argument("--output-dir", required=True, help="Output folder for cropped detected videos")
     parser.add_argument("--size", type=parse_size, required=True, help="Output size WIDTHxHEIGHT")
     parser.add_argument("--threshold", type=float, default=0.5, help="Detection confidence threshold")
     parser.add_argument("--codec", default="mp4v", help="FourCC codec for output videos (e.g. mp4v, XVID)")
@@ -38,17 +39,44 @@ def select_box(prediction: dict[str, torch.Tensor], threshold: float) -> np.ndar
     return boxes[best_idx]
 
 
-def draw_box(frame: np.ndarray, box: np.ndarray | None) -> np.ndarray:
+def crop_frame(frame: np.ndarray, center: tuple[float, float], output_size: tuple[int, int]) -> np.ndarray:
+    output_width, output_height = output_size
+    frame_height, frame_width = frame.shape[:2]
+    center_x, center_y = center
+
+    crop_x1 = math.floor(center_x - (output_width / 2.0) + 0.5)
+    crop_y1 = math.floor(center_y - (output_height / 2.0) + 0.5)
+    crop_x2 = crop_x1 + output_width
+    crop_y2 = crop_y1 + output_height
+
+    src_x1 = max(0, crop_x1)
+    src_y1 = max(0, crop_y1)
+    src_x2 = min(frame_width, crop_x2)
+    src_y2 = min(frame_height, crop_y2)
+
+    if frame.ndim == 2:
+        cropped = np.zeros((output_height, output_width), dtype=frame.dtype)
+    else:
+        cropped = np.zeros((output_height, output_width, frame.shape[2]), dtype=frame.dtype)
+
+    if src_x1 >= src_x2 or src_y1 >= src_y2:
+        return cropped
+
+    dst_x1 = src_x1 - crop_x1
+    dst_y1 = src_y1 - crop_y1
+    dst_x2 = dst_x1 + (src_x2 - src_x1)
+    dst_y2 = dst_y1 + (src_y2 - src_y1)
+    cropped[dst_y1:dst_y2, dst_x1:dst_x2] = frame[src_y1:src_y2, src_x1:src_x2]
+    return cropped
+
+
+def crop_frame_around_box(frame: np.ndarray, box: np.ndarray | None, output_size: tuple[int, int]) -> np.ndarray:
     if box is None:
-        return frame
-    x1, y1, x2, y2 = box.astype(int)
-    x1 = max(0, x1)
-    y1 = max(0, y1)
-    x2 = max(x1 + 1, x2)
-    y2 = max(y1 + 1, y2)
-    output = frame.copy()
-    cv2.rectangle(output, (x1, y1), (x2, y2), (0, 255, 0), 2)
-    return output
+        center = (frame.shape[1] / 2.0, frame.shape[0] / 2.0)
+    else:
+        x1, y1, x2, y2 = box.astype(float)
+        center = ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
+    return crop_frame(frame, center, output_size)
 
 
 def load_model(weights_path: str | Path, device: torch.device) -> torch.nn.Module:
@@ -94,9 +122,8 @@ def process_video(
                 tensor = torch.from_numpy(rgb).permute(2, 0, 1).float().to(device) / 255.0
                 prediction = model([tensor])[0]
                 box = select_box(prediction, threshold)
-                drawn = draw_box(frame, box)
-                resized = cv2.resize(drawn, output_size, interpolation=cv2.INTER_AREA)
-                writer.write(resized)
+                cropped = crop_frame_around_box(frame, box, output_size)
+                writer.write(cropped)
     finally:
         capture.release()
         writer.release()
